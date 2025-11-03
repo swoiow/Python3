@@ -1,50 +1,88 @@
-name: CI
+name: Build CPython (Windows)
 
 on:
   workflow_dispatch:
+    inputs:
+      python_version:
+        description: "CPython version to build (e.g. 3.12.10, 3.12.12)"
+        required: true
+        default: "3.12.12"
+
+permissions:
+  contents: write  # 创建 Release 需要
 
 jobs:
   build-python:
     runs-on: windows-latest
 
+    env:
+      PY_VER: ${{ inputs.python_version }}
+
     steps:
-      - name: Checkout (just to have a workspace)
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Download CPython 3.12.12 source
+      - name: Show build version
         run: |
-          curl -L -o Python-3.12.12.tgz https://www.python.org/ftp/python/3.12.12/Python-3.12.12.tgz
+          echo Building CPython %PY_VER% for Windows x64
+        shell: cmd
+
+      - name: Download CPython source
+        run: |
+          curl -L -o Python-%PY_VER%.tgz https://www.python.org/ftp/python/%PY_VER%/Python-%PY_VER%.tgz
+        shell: cmd
 
       - name: Extract source
         run: |
-          tar -xvf Python-3.12.12.tgz
+          tar -xvf Python-$PY_VER.tgz
         shell: bash
 
       - name: List extracted content
         run: |
           dir
-          dir Python-3.12.12
+          dir Python-%PY_VER%
+        shell: cmd
 
       - name: Prepare external deps
         run: |
-          cd Python-3.12.12\PCbuild
+          cd Python-%PY_VER%\PCbuild
           call get_externals.bat
         shell: cmd
 
       - name: Build CPython (Release x64)
         run: |
-          cd Python-3.12.12\PCbuild
+          cd Python-%PY_VER%\PCbuild
           call build.bat -c Release -p x64
         shell: cmd
 
       - name: Collect build outputs
         run: |
           mkdir output
-          copy Python-3.12.12\PCbuild\amd64\* output\
+          copy Python-%PY_VER%\PCbuild\amd64\* output\
         shell: cmd
 
-      - name: Upload build artifacts
+      - name: Pack to 7z (max compression)
+        run: |
+          7z a -t7z -m0=lzma2 -mx=9 -mmt=on cpython-%PY_VER%-win64.7z .\output\*
+        shell: cmd
+
+      - name: Upload artifact (7z)
         uses: actions/upload-artifact@v4
         with:
-          name: cpython-3.12.12-win64
-          path: output\
+          name: cpython-${{ env.PY_VER }}-win64
+          path: cpython-${{ env.PY_VER }}-win64.7z
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.PY_VER }}-win64
+          name: CPython ${{ env.PY_VER }} for Windows x64
+          body: |
+            CPython ${{ env.PY_VER }} for Windows x64, built on GitHub Actions.
+
+            - Version: ${{ env.PY_VER }}
+            - Platform: Windows x64
+          files: |
+            cpython-${{ env.PY_VER }}-win64.7z
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
