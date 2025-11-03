@@ -1,51 +1,50 @@
 name: CI
 
 on:
-  push:
   workflow_dispatch:
 
 jobs:
-  build-installer:
+  build-python:
     runs-on: windows-latest
 
     steps:
-      - name: 下载 Python 源码包
-        run: |
-          Invoke-WebRequest `
-            -Uri https://www.python.org/ftp/python/3.12.11/Python-3.12.11.tgz `
-            -OutFile Python-3.12.11.tgz
+      - name: Checkout (just to have a workspace)
+        uses: actions/checkout@v4
 
-      - name: 解压源码
+      - name: Download CPython 3.12.12 source
+        run: |
+          curl -L -o Python-3.12.12.tgz https://www.python.org/ftp/python/3.12.12/Python-3.12.12.tgz
+
+      - name: Extract source
+        run: |
+          tar -xvf Python-3.12.12.tgz
         shell: bash
+
+      - name: List extracted content
         run: |
-          mkdir python-src
-          tar -xzf Python-3.12.11.tgz -C python-src --strip-components=1
+          dir
+          dir Python-3.12.12
 
-      - name: 安装 MSI 构建依赖（WiX Toolset 等）
-        working-directory: python-src/Tools/msi
-        shell: powershell
-        run: .\get_externals.bat
-
-      - name: 禁用文档模块（注释 build.bat 中构建 doc 的部分）
-        shell: powershell
+      - name: Prepare external deps
         run: |
-          (Get-Content python-src/Tools/msi/build.bat) `
-            -replace 'call :Build doc %\*', 'REM call :Build doc %*' `
-            -replace 'call :Build tcltk %\*', 'REM call :Build tcltk %*' |
-          Set-Content python-src/Tools/msi/build.bat
-
-      - name: 编译并生成安装包布局 (x64)
-        working-directory: python-src/Tools/msi
+          cd Python-3.12.12\PCbuild
+          call get_externals.bat
         shell: cmd
-        run: build.bat -x64 --no-include-tests --no-docs --no-tcltk --no-include-symbols
 
-      - name: 收集并上传安装程序产物
+      - name: Build CPython (Release x64)
+        run: |
+          cd Python-3.12.12\PCbuild
+          call build.bat -c Release -p x64
+        shell: cmd
+
+      - name: Collect build outputs
+        run: |
+          mkdir output
+          copy Python-3.12.12\PCbuild\amd64\* output\
+        shell: cmd
+
+      - name: Upload build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: python-3.12.11-win-amd64-installer
-          path: |
-            python-src/PCbuild/amd64/en-us/*.exe
-            python-src/PCbuild/amd64/en-us/*.msi
-            python-src/PCbuild/amd64/en-us/*.cab
-          retention-days: 1
-          compression-level: 0
+          name: cpython-3.12.12-win64
+          path: output\
